@@ -1,6 +1,12 @@
 import { Dataset, createPuppeteerRouter } from 'crawlee';
 import { Actor } from 'apify';
 import Anthropic from '@anthropic-ai/sdk';
+import { ActorInput } from './types.js';
+
+// Initialize Anthropic client
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY!,
+});
 
 // Define our analysis output type
 interface BusinessAnalysis {
@@ -16,11 +22,6 @@ interface BusinessAnalysis {
         [platform: string]: string;
     };
 }
-
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-});
 
 // Helper function to analyze text with Claude
 async function analyzeWithClaude(text: string): Promise<BusinessAnalysis> {
@@ -62,18 +63,7 @@ Format the response as valid parseable JSON.`;
 export const router = createPuppeteerRouter();
 
 // Add the default handler for processing business pages
-router.addDefaultHandler(async ({ page, request, log, enqueueLinks }) => {
-    // First, enqueue all links from the same domain for crawling
-    await enqueueLinks({
-        globs: [`${new URL(request.url).origin}/*`], // Only follow links from same domain
-        transformRequestFunction: (req) => {
-            // Exclude common file types we don't want to crawl
-            if (req.url.match(/\.(jpg|jpeg|png|gif|pdf|doc|docx|zip)$/i)) {
-                return false;
-            }
-            return req;
-        }
-    });
+router.addDefaultHandler(async ({ page, request, log }) => {
     log.info(`Processing ${request.url}...`);
 
     // Wait for content to load
@@ -114,10 +104,11 @@ router.addDefaultHandler(async ({ page, request, log, enqueueLinks }) => {
     try {
         // Analyze with Claude
         const analysis = await analyzeWithClaude(text);
-        
+
         // Capture screenshot if enabled
         let screenshot;
-        if (Actor.getInput<Input>()?.includeScreenshots) {
+        const input = await Actor.getInput<ActorInput>();
+        if (input?.includeScreenshots) {
             screenshot = await page.screenshot({
                 type: 'jpeg',
                 quality: 80,
@@ -127,7 +118,7 @@ router.addDefaultHandler(async ({ page, request, log, enqueueLinks }) => {
             const screenshotKey = `screenshot-${request.id}`;
             await Actor.setValue(screenshotKey, screenshot, { contentType: 'image/jpeg' });
         }
-
+        
         // Push the results to the dataset
         await Dataset.pushData({
             url: request.url,

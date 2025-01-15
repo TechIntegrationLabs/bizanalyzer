@@ -1,27 +1,18 @@
-// For local development environment variables
 import 'dotenv/config';
-
-// Core imports
 import { Actor } from 'apify';
 import { PuppeteerCrawler } from 'crawlee';
 import { router } from './routes.js';
+import { ActorInput } from './types.js';
 
 // Initialize the Actor
 await Actor.init();
-
-// Define our input interface matching input_schema.json
-interface Input {
-    startUrls: Array<{ url: string }>;
-    maxPagesToCrawl?: number;
-    includeScreenshots?: boolean;
-}
 
 // Get and validate input with defaults
 const {
     startUrls = [],
     maxPagesToCrawl = 1,
     includeScreenshots = false,
-} = await Actor.getInput<Input>() ?? {};
+} = await Actor.getInput<ActorInput>() ?? {};
 
 // Validate input
 if (!startUrls.length) {
@@ -36,8 +27,8 @@ if (!anthropicApiKey) {
 
 // Create a proxy configuration
 const proxyConfiguration = await Actor.createProxyConfiguration({
-    groups: ['RESIDENTIAL'], // Use residential proxy group
-    countryCode: 'US',      // Use US proxies
+    groups: ['RESIDENTIAL'],
+    countryCode: 'US',
 });
 
 // Configure the crawler
@@ -67,7 +58,6 @@ const crawler = new PuppeteerCrawler({
     // Browser pool configuration
     browserPoolOptions: {
         maxOpenPagesPerBrowser: 1,
-        retireInstanceAfterRequestCount: 50,
     },
 
     // Request handling configuration
