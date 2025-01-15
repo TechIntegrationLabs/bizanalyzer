@@ -1,4 +1,7 @@
+// For local development environment variables
 import 'dotenv/config';
+
+// Core imports
 import { Actor } from 'apify';
 import { PuppeteerCrawler } from 'crawlee';
 import { router } from './routes.js';
@@ -19,25 +22,26 @@ if (!startUrls.length) {
     throw new Error('At least one URL must be provided in the startUrls array');
 }
 
-// Get ANTHROPIC_API_KEY using configuration class
-const anthropicApiKey = await Actor.getValue('ANTHROPIC_API_KEY');
-if (!anthropicApiKey) {
+// Validate required environment variables
+if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY must be set in actor secrets');
 }
 
-// Add the API key to Actor configuration for use in routes
-Actor.config.set('ANTHROPIC_API_KEY', anthropicApiKey);
-
 // Create a proxy configuration
 const proxyConfiguration = await Actor.createProxyConfiguration({
-    groups: ['RESIDENTIAL'],
-    countryCode: 'US',
+    groups: ['RESIDENTIAL'], // Use residential proxy group
+    countryCode: 'US',      // Use US proxies
 });
 
 // Configure the crawler
 const crawler = new PuppeteerCrawler({
+    // Use the proxy configuration
     proxyConfiguration,
+    
+    // Maximum number of pages to process
     maxRequestsPerCrawl: maxPagesToCrawl,
+    
+    // Use our router for handling requests
     requestHandler: router,
     
     // Configure browser launch
@@ -50,6 +54,8 @@ const crawler = new PuppeteerCrawler({
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
             ],
             defaultViewport: {
                 width: 1920,
@@ -60,16 +66,26 @@ const crawler = new PuppeteerCrawler({
 
     // Browser pool configuration
     browserPoolOptions: {
-        maxOpenPagesPerBrowser: 1,
+        maxOpenPagesPerBrowser: 1,  // Limit pages per browser for stability
     },
 
-    // Request handling configuration
+    // Configure how to handle failed requests
     maxRequestRetries: 3,
     requestHandlerTimeoutSecs: 90,
     navigationTimeoutSecs: 60,
+
+    // Automatically handle browser errors
+    browserCrashHandler: async ({ page, requestQueue, session }) => {
+        console.log('Browser crashed, request will be retried automatically');
+    },
 });
 
-// Store initial configuration
+// Add event handlers for the crawler
+crawler.on('sessionFailed', () => {
+    console.log('Session failed, will be retried with a new proxy');
+});
+
+// Store initial configuration in the actor state
 await Actor.setValue('config', {
     maxPagesToCrawl,
     includeScreenshots,
@@ -91,6 +107,10 @@ try {
         pagesProcessed: crawler.stats.state.requestsFinished,
         errors: crawler.stats.state.requestsFailed,
         endTime: new Date().toISOString(),
+        totalPagesCrawled: crawler.stats.state.requestsFinished,
+        failedRequests: crawler.stats.state.requestsFailed,
+        retries: crawler.stats.state.requestRetries,
+        crawlingTime: Date.now() - new Date(await Actor.getValue('config')).getTime(),
     });
 } catch (error) {
     // Store error state
@@ -100,9 +120,20 @@ try {
         pagesProcessed: crawler.stats.state.requestsFinished,
         errors: crawler.stats.state.requestsFailed,
         endTime: new Date().toISOString(),
+        totalPagesCrawled: crawler.stats.state.requestsFinished,
+        failedRequests: crawler.stats.state.requestsFailed,
+        retries: crawler.stats.state.requestRetries,
     });
     
     throw error;
+} finally {
+    // Store final statistics
+    await Actor.setValue('stats', {
+        endTime: new Date().toISOString(),
+        pagesProcessed: crawler.stats.state.requestsFinished,
+        errors: crawler.stats.state.requestsFailed,
+        retries: crawler.stats.state.requestRetries,
+    });
 }
 
 // Exit gracefully
