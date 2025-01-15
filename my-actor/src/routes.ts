@@ -37,7 +37,12 @@ Format the response as valid parseable JSON.`;
     });
 
     try {
-        return JSON.parse(response.content[0].text) as BusinessAnalysis;
+        // Access the content correctly from the response
+        const content = response.content[0].value;
+        if (typeof content !== 'string') {
+            throw new Error('Unexpected response format from Claude');
+        }
+        return JSON.parse(content) as BusinessAnalysis;
     } catch (e) {
         console.error('Failed to parse Claude response:', e);
         throw new Error('Failed to parse Claude analysis');

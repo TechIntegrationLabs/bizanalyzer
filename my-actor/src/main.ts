@@ -73,16 +73,6 @@ const crawler = new PuppeteerCrawler({
     maxRequestRetries: 3,
     requestHandlerTimeoutSecs: 90,
     navigationTimeoutSecs: 60,
-
-    // Automatically handle browser errors
-    browserCrashHandler: async ({ page, requestQueue, session }) => {
-        console.log('Browser crashed, request will be retried automatically');
-    },
-});
-
-// Add event handlers for the crawler
-crawler.on('sessionFailed', () => {
-    console.log('Session failed, will be retried with a new proxy');
 });
 
 // Store initial configuration in the actor state
@@ -110,7 +100,7 @@ try {
         totalPagesCrawled: crawler.stats.state.requestsFinished,
         failedRequests: crawler.stats.state.requestsFailed,
         retries: crawler.stats.state.requestRetries,
-        crawlingTime: Date.now() - new Date(await Actor.getValue('config')).getTime(),
+        crawlingTime: Date.now() - new Date((await Actor.getValue<{ startTime: string }>('config'))?.startTime || Date.now()).getTime(),
     };
     await Actor.setValue('CRAWLER_RESULT', result);
 
