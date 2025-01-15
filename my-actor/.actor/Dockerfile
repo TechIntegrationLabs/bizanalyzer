@@ -1,39 +1,32 @@
-# Specify the base Docker image. You can read more about
-# the available images at https://crawlee.dev/docs/guides/docker-images
-# You can also use any other image from Docker Hub.
+# Builder stage
 FROM apify/actor-node-puppeteer-chrome:20 AS builder
 
 # Check preinstalled packages
 RUN npm ls crawlee apify puppeteer playwright
 
-# Copy just package.json and package-lock.json
-# to speed up the build using Docker layer cache.
+# Copy package files
 COPY --chown=myuser package*.json ./
 
-# Install all dependencies. Don't audit to speed up the installation.
+# Install all dependencies including dev dependencies
 RUN npm install --include=dev --audit=false
 
-# Next, copy the source files using the user set
-# in the base image.
+# Copy source files
 COPY --chown=myuser . ./
 
-# Install all dependencies and build the project.
-# Don't audit to speed up the installation.
+# Build TypeScript project
 RUN npm run build
 
-# Create final image
+# Final stage
 FROM apify/actor-node-puppeteer-chrome:20
 
 # Check preinstalled packages
 RUN npm ls crawlee apify puppeteer playwright
 
-# Copy just package.json and package-lock.json
-# to speed up the build using Docker layer cache.
+# Copy package files
 COPY --chown=myuser package*.json ./
 
-# Install NPM packages, skip optional and development dependencies to
-# keep the image small. Avoid logging too much and print the dependency
-# tree for debugging
+# Install production dependencies
+# Note: @anthropic-ai/sdk is required in production
 RUN npm --quiet set progress=false \
     && npm install --omit=dev --omit=optional \
     && echo "Installed NPM packages:" \
@@ -44,15 +37,15 @@ RUN npm --quiet set progress=false \
     && npm --version \
     && rm -r ~/.npm
 
-# Copy built JS files from builder image
+# Copy built files from builder
 COPY --from=builder --chown=myuser /home/myuser/dist ./dist
 
-# Next, copy the remaining files and directories with the source code.
-# Since we do this after NPM install, quick build will be really fast
-# for most source file changes.
+# Copy remaining source files
 COPY --chown=myuser . ./
 
+# Health check to ensure Chrome is available
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD node -e "const p=require('puppeteer');(async () => { const b = await p.launch(); await b.close(); })()"
 
-# Run the image. If you know you won't need headful browsers,
-# you can remove the XVFB start script for a micro perf gain.
+# Run with XVFB for headful capability
 CMD ./start_xvfb_and_run_cmd.sh && npm run start:prod --silent

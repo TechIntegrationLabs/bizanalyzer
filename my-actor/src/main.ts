@@ -1,18 +1,17 @@
-// Load environment variables from .env file in development
+// For local development environment variables
 import 'dotenv/config';
 
-// Apify SDK - toolkit for building Apify Actors
+// Core imports
 import { Actor } from 'apify';
-// Web scraping and browser automation library
-import { PuppeteerCrawler, Request, Configuration, ProxyConfiguration } from 'crawlee';
+import { PuppeteerCrawler } from 'crawlee';
 import { router } from './routes.js';
 
-// The init() call configures the Actor for its environment. 
+// Initialize the Actor
 await Actor.init();
 
 // Define our input interface matching input_schema.json
 interface Input {
-    startUrls: Request[];
+    startUrls: Array<{ url: string }>;
     maxPagesToCrawl?: number;
     includeScreenshots?: boolean;
 }
@@ -35,36 +34,28 @@ if (!anthropicApiKey) {
     throw new Error('ANTHROPIC_API_KEY must be set in actor secrets');
 }
 
-// Create a proxy configuration that will rotate proxies from Apify Proxy
+// Create a proxy configuration
 const proxyConfiguration = await Actor.createProxyConfiguration({
-    // Optional custom configuration
     groups: ['RESIDENTIAL'], // Use residential proxy group
     countryCode: 'US',      // Use US proxies
 });
 
 // Configure the crawler
 const crawler = new PuppeteerCrawler({
-    // Use the proxy configuration
     proxyConfiguration,
-    
-    // Maximum number of pages to process
     maxRequestsPerCrawl: maxPagesToCrawl,
-    
-    // Use our router for handling requests
     requestHandler: router,
     
-    // Configure how the browser should be launched
+    // Configure browser launch
     launchContext: {
         launchOptions: {
-            headless: true, // Run in headless mode
+            headless: true,
             args: [
-                '--disable-gpu', // Mitigates GPU crashes in Docker
+                '--disable-gpu',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage', // Prevents out of memory errors
+                '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas',
-                '--disable-web-security', // Allows cross-origin requests
-                '--disable-features=IsolateOrigins,site-per-process', // Helps with frames
             ],
             defaultViewport: {
                 width: 1920,
@@ -73,53 +64,53 @@ const crawler = new PuppeteerCrawler({
         },
     },
 
-    // Configure browser pool
+    // Browser pool configuration
     browserPoolOptions: {
-        maxOpenPagesPerBrowser: 1, // Limit pages per browser for stability
-        retireInstanceAfterRequestCount: 50, // Retire browser after 50 requests
+        maxOpenPagesPerBrowser: 1,
+        retireInstanceAfterRequestCount: 50,
     },
 
-    // Configure how to handle failed requests
+    // Request handling configuration
     maxRequestRetries: 3,
     requestHandlerTimeoutSecs: 90,
     navigationTimeoutSecs: 60,
-
-    // Automatically handle browser errors
-    browserCrashHandler: async ({ page, requestQueue, session }) => {
-        // Implement custom crash handling if needed
-        console.log('Browser crashed, request will be retried automatically');
-    },
 });
 
-// Add event handlers for the crawler
-crawler.on('sessionFailed', () => {
-    console.log('Session failed, will be retried with a new proxy');
-});
-
-// Store the crawler configuration in the actor state
-// This is useful for debugging and monitoring
-await Actor.setValue('crawlerConfig', {
+// Store initial configuration
+await Actor.setValue('config', {
     maxPagesToCrawl,
     includeScreenshots,
     proxyConfig: proxyConfiguration?.toString(),
     startTime: new Date().toISOString(),
+    startUrls: startUrls.map(u => u.url),
 });
 
 try {
-    // Run the crawler with the start URLs
-    await crawler.run(startUrls);
-} catch (error) {
-    // Log any errors that occurred during the crawl
-    console.error('Crawler failed:', error);
-    throw error;
-} finally {
-    // Store final statistics
-    await Actor.setValue('stats', {
-        endTime: new Date().toISOString(),
+    // Convert input URLs to the format crawler expects
+    const crawlerUrls = startUrls.map(({ url }) => url);
+    
+    // Run the crawler
+    await crawler.run(crawlerUrls);
+
+    // Store final success state
+    await Actor.setValue('CRAWLER_RESULT', {
+        status: 'SUCCEEDED',
         pagesProcessed: crawler.stats.state.requestsFinished,
         errors: crawler.stats.state.requestsFailed,
+        endTime: new Date().toISOString(),
     });
+} catch (error) {
+    // Store error state
+    await Actor.setValue('CRAWLER_RESULT', {
+        status: 'FAILED',
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        pagesProcessed: crawler.stats.state.requestsFinished,
+        errors: crawler.stats.state.requestsFailed,
+        endTime: new Date().toISOString(),
+    });
+    
+    throw error;
 }
 
-// Gracefully exit the Actor process
+// Exit gracefully
 await Actor.exit();
