@@ -12,6 +12,3 @@ node_modules
 
 # git folder
 .git
-
-# dist folder
-dist

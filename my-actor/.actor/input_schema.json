@@ -1,0 +1,33 @@
+{
+    "title": "Business URL Analyzer",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "startUrls": {
+            "title": "Business URLs",
+            "type": "array",
+            "description": "URLs of business websites to analyze. Each website will be crawled and analyzed using AI to extract business information.",
+            "editor": "requestListSources",
+            "prefill": [
+                {
+                    "url": "https://www.thedodorestaurant.com"
+                }
+            ]
+        },
+        "maxPagesToCrawl": {
+            "title": "Max Pages to Crawl",
+            "type": "integer",
+            "description": "Maximum number of pages to crawl per website. Use 1 to analyze only the homepage.",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 1
+        },
+        "includeScreenshots": {
+            "title": "Capture Screenshots",
+            "type": "boolean",
+            "description": "Whether to capture and save screenshots of analyzed pages",
+            "default": false
+        }
+    },
+    "required": ["startUrls"]
+}

@@ -1,13 +1,12 @@
 # This file tells Git which files shouldn't be added to source control
 
+.DS_Store
 .idea
 .vscode
-storage
-apify_storage
-crawlee_storage
-node_modules
 dist
-tsconfig.tsbuildinfo
+node_modules
+apify_storage
+storage
 
 # Added by Apify CLI
 .venv
