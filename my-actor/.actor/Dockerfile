@@ -1,40 +1,42 @@
-# Builder stage
 FROM apify/actor-node-puppeteer-chrome:20 AS builder
 
-# Copy package files
-COPY --chown=myuser package*.json ./
+# Add build argument for monorepo support
+ARG ACTOR_PATH_IN_DOCKER_CONTEXT
 
-# Install all dependencies including dev dependencies
+# Copy package files
+COPY --chown=myuser ${ACTOR_PATH_IN_DOCKER_CONTEXT}package*.json ./
+
+# Install all dependencies
 RUN npm install --include=dev --audit=false
 
-# Copy source files
-COPY --chown=myuser . ./
+# Copy source files using the build argument
+COPY --chown=myuser ${ACTOR_PATH_IN_DOCKER_CONTEXT} ./
 
 # Build TypeScript project
 RUN npm run build
 
-# Final stage
+# Final image
 FROM apify/actor-node-puppeteer-chrome:20
 
+# Add build argument for monorepo support in final stage
+ARG ACTOR_PATH_IN_DOCKER_CONTEXT
+
 # Copy package files
-COPY --chown=myuser package*.json ./
+COPY --chown=myuser ${ACTOR_PATH_IN_DOCKER_CONTEXT}package*.json ./
 
 # Install production dependencies
 RUN npm --quiet set progress=false \
-    && npm install --omit=dev --omit=optional \
-    && echo "Installed NPM packages:" \
-    && (npm list --omit=dev --all || true) \
-    && echo "Node.js version:" \
-    && node --version \
-    && echo "NPM version:" \
-    && npm --version \
-    && rm -r ~/.npm
+    && npm install --omit=dev --omit=optional
 
 # Copy built files from builder
 COPY --from=builder --chown=myuser /home/myuser/dist ./dist
 
-# IMPORTANT: Create a main.js file that requires our compiled TypeScript
+# Set up entry point
 RUN echo "import('./dist/main.js');" > main.js
+
+# Set environment variable
+ARG ANTHROPIC_API_KEY
+ENV ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
 # Run the actor
 CMD npm run start:prod
