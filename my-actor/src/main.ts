@@ -5,7 +5,7 @@ import 'dotenv/config';
 import { Actor } from 'apify';
 import { PuppeteerCrawler } from 'crawlee';
 import { router } from './routes.js';
-import { ActorInput } from './types.js';
+import { ActorInput, ActorResult } from './types.js';
 
 // Initialize the Actor
 await Actor.init();
@@ -102,7 +102,7 @@ try {
     await crawler.run(crawlerUrls);
 
     // Store final success state
-    await Actor.setValue('CRAWLER_RESULT', {
+    const result: ActorResult = {
         status: 'SUCCEEDED',
         pagesProcessed: crawler.stats.state.requestsFinished,
         errors: crawler.stats.state.requestsFailed,
@@ -111,10 +111,12 @@ try {
         failedRequests: crawler.stats.state.requestsFailed,
         retries: crawler.stats.state.requestRetries,
         crawlingTime: Date.now() - new Date(await Actor.getValue('config')).getTime(),
-    });
+    };
+    await Actor.setValue('CRAWLER_RESULT', result);
+
 } catch (error) {
     // Store error state
-    await Actor.setValue('CRAWLER_RESULT', {
+    const result: ActorResult = {
         status: 'FAILED',
         error: error instanceof Error ? error.message : 'Unknown error occurred',
         pagesProcessed: crawler.stats.state.requestsFinished,
@@ -123,7 +125,8 @@ try {
         totalPagesCrawled: crawler.stats.state.requestsFinished,
         failedRequests: crawler.stats.state.requestsFailed,
         retries: crawler.stats.state.requestRetries,
-    });
+    };
+    await Actor.setValue('CRAWLER_RESULT', result);
     
     throw error;
 } finally {

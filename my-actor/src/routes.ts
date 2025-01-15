@@ -1,27 +1,12 @@
 import { Dataset, createPuppeteerRouter } from 'crawlee';
 import { Actor } from 'apify';
 import Anthropic from '@anthropic-ai/sdk';
-import { ActorInput } from './types.js';
+import { ActorInput, BusinessAnalysis, DatasetItem } from './types.js';
 
 // Initialize Anthropic client
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY!,
 });
-
-// Define our analysis output type
-interface BusinessAnalysis {
-    title: string;
-    businessType: string;
-    observations: string[];
-    contactInfo?: {
-        email?: string;
-        phone?: string;
-        address?: string;
-    };
-    socialMedia?: {
-        [platform: string]: string;
-    };
-}
 
 // Helper function to analyze text with Claude
 async function analyzeWithClaude(text: string): Promise<BusinessAnalysis> {
@@ -132,12 +117,13 @@ router.addDefaultHandler(async ({ page, request, enqueueLinks, log }) => {
         }
         
         // Push the results to the dataset
-        await Dataset.pushData({
+        const datasetItem: DatasetItem = {
             url: request.url,
             analysis,
             timestamp: new Date().toISOString(),
             screenshotId: screenshot ? request.id : undefined
-        });
+        };
+        await Dataset.pushData(datasetItem);
 
         log.info('Successfully analyzed page', { url: request.url });
     } catch (error) {
