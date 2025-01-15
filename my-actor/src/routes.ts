@@ -1,135 +1,109 @@
-import { Dataset, createPuppeteerRouter } from 'crawlee';
+import 'dotenv/config';
 import { Actor } from 'apify';
-import Anthropic from '@anthropic-ai/sdk';
+import { PuppeteerCrawler } from 'crawlee';
+import { router } from './routes.js';
 import { ActorInput } from './types.js';
 
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+// Initialize the Actor
+await Actor.init();
 
-// Define our analysis output type
-interface BusinessAnalysis {
-    title: string;
-    businessType: string;
-    observations: string[];
-    contactInfo?: {
-        email?: string;
-        phone?: string;
-        address?: string;
-    };
-    socialMedia?: {
-        [platform: string]: string;
-    };
+// Get and validate input with defaults
+const {
+    startUrls = [],
+    maxPagesToCrawl = 1,
+    includeScreenshots = false,
+} = await Actor.getInput<ActorInput>() ?? {};
+
+// Validate input
+if (!startUrls.length) {
+    throw new Error('At least one URL must be provided in the startUrls array');
 }
 
-// Helper function to analyze text with Claude
-async function analyzeWithClaude(text: string): Promise<BusinessAnalysis> {
-    const prompt = `
-Analyze this business website text and extract key information. 
-Website text: "${text.slice(0, 15000)}"
-
-Return a JSON object with:
-- title: The business name/title
-- businessType: The type/category of business
-- observations: Key observations about their offerings, approach, or unique aspects
-- contactInfo: Any contact information found (email, phone, address)
-- socialMedia: Any social media links found
-
-Format the response as valid parseable JSON.`;
-
-    const response = await anthropic.messages.create({
-        model: 'claude-3-sonnet-20240229',
-        max_tokens: 1024,
-        temperature: 0.5,
-        system: "You are an expert at analyzing business websites and extracting key information. Always return valid JSON.",
-        messages: [
-            {
-                role: 'user',
-                content: prompt,
-            }
-        ]
-    });
-
-    try {
-        return JSON.parse(response.content[0].text) as BusinessAnalysis;
-    } catch (e) {
-        console.error('Failed to parse Claude response:', e);
-        throw new Error('Failed to parse Claude analysis');
-    }
+// Get ANTHROPIC_API_KEY using configuration class
+const anthropicApiKey = await Actor.getValue('ANTHROPIC_API_KEY');
+if (!anthropicApiKey) {
+    throw new Error('ANTHROPIC_API_KEY must be set in actor secrets');
 }
 
-// Create and export the router
-export const router = createPuppeteerRouter();
+// Add the API key to Actor configuration for use in routes
+Actor.config.set('ANTHROPIC_API_KEY', anthropicApiKey);
 
-// Add the default handler for processing business pages
-router.addDefaultHandler(async ({ page, request, log }) => {
-    log.info(`Processing ${request.url}...`);
-
-    // Wait for content to load
-    await page.waitForNetworkIdle();
-
-    // Extract all visible text
-    const text = await page.evaluate(() => {
-        const walker = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            {
-                acceptNode: (node) => {
-                    // Only accept visible text nodes
-                    const element = node.parentElement;
-                    if (!element) return NodeFilter.FILTER_REJECT;
-                    
-                    const style = window.getComputedStyle(element);
-                    const isVisible = style.display !== 'none' && 
-                                    style.visibility !== 'hidden' &&
-                                    style.opacity !== '0';
-                    
-                    return isVisible ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-                }
-            }
-        );
-
-        let text = '';
-        let node;
-        while ((node = walker.nextNode())) {
-            const trimmed = node.textContent?.trim();
-            if (trimmed) {
-                text += trimmed + ' ';
-            }
-        }
-        return text;
-    });
-
-    try {
-        // Analyze with Claude
-        const analysis = await analyzeWithClaude(text);
-
-        // Capture screenshot if enabled
-        let screenshot;
-        const input = await Actor.getInput<ActorInput>();
-        if (input?.includeScreenshots) {
-            screenshot = await page.screenshot({
-                type: 'jpeg',
-                quality: 80,
-                fullPage: true
-            });
-            // Save screenshot to key-value store
-            const screenshotKey = `screenshot-${request.id}`;
-            await Actor.setValue(screenshotKey, screenshot, { contentType: 'image/jpeg' });
-        }
-        
-        // Push the results to the dataset
-        await Dataset.pushData({
-            url: request.url,
-            analysis,
-            timestamp: new Date().toISOString(),
-            screenshotId: screenshot ? request.id : undefined
-        });
-
-        log.info('Successfully analyzed page', { url: request.url });
-    } catch (error) {
-        log.error('Failed to analyze page', { url: request.url, error: (error as Error).message });
-        throw error;
-    }
+// Create a proxy configuration
+const proxyConfiguration = await Actor.createProxyConfiguration({
+    groups: ['RESIDENTIAL'],
+    countryCode: 'US',
 });
+
+// Configure the crawler
+const crawler = new PuppeteerCrawler({
+    proxyConfiguration,
+    maxRequestsPerCrawl: maxPagesToCrawl,
+    requestHandler: router,
+    
+    // Configure browser launch
+    launchContext: {
+        launchOptions: {
+            headless: true,
+            args: [
+                '--disable-gpu',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+            ],
+            defaultViewport: {
+                width: 1920,
+                height: 1080,
+            },
+        },
+    },
+
+    // Browser pool configuration
+    browserPoolOptions: {
+        maxOpenPagesPerBrowser: 1,
+    },
+
+    // Request handling configuration
+    maxRequestRetries: 3,
+    requestHandlerTimeoutSecs: 90,
+    navigationTimeoutSecs: 60,
+});
+
+// Store initial configuration
+await Actor.setValue('config', {
+    maxPagesToCrawl,
+    includeScreenshots,
+    proxyConfig: proxyConfiguration?.toString(),
+    startTime: new Date().toISOString(),
+    startUrls: startUrls.map(u => u.url),
+});
+
+try {
+    // Convert input URLs to the format crawler expects
+    const crawlerUrls = startUrls.map(({ url }) => url);
+    
+    // Run the crawler
+    await crawler.run(crawlerUrls);
+
+    // Store final success state
+    await Actor.setValue('CRAWLER_RESULT', {
+        status: 'SUCCEEDED',
+        pagesProcessed: crawler.stats.state.requestsFinished,
+        errors: crawler.stats.state.requestsFailed,
+        endTime: new Date().toISOString(),
+    });
+} catch (error) {
+    // Store error state
+    await Actor.setValue('CRAWLER_RESULT', {
+        status: 'FAILED',
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        pagesProcessed: crawler.stats.state.requestsFinished,
+        errors: crawler.stats.state.requestsFailed,
+        endTime: new Date().toISOString(),
+    });
+    
+    throw error;
+}
+
+// Exit gracefully
+await Actor.exit();

@@ -19,11 +19,14 @@ if (!startUrls.length) {
     throw new Error('At least one URL must be provided in the startUrls array');
 }
 
-// Validate required environment variables
-const anthropicApiKey = await Actor.getEnv().ANTHROPIC_API_KEY;
+// Get ANTHROPIC_API_KEY using configuration class
+const anthropicApiKey = await Actor.getValue('ANTHROPIC_API_KEY');
 if (!anthropicApiKey) {
     throw new Error('ANTHROPIC_API_KEY must be set in actor secrets');
 }
+
+// Add the API key to Actor configuration for use in routes
+Actor.config.set('ANTHROPIC_API_KEY', anthropicApiKey);
 
 // Create a proxy configuration
 const proxyConfiguration = await Actor.createProxyConfiguration({

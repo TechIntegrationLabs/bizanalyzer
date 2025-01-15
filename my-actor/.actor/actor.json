@@ -10,6 +10,10 @@
     "input": "./input_schema.json",
     "dockerfile": "./Dockerfile",
     "environmentVariables": {
-        "ANTHROPIC_API_KEY": "@ANTHROPIC_API_KEY"
+        "ANTHROPIC_API_KEY": {
+            "name": "ANTHROPIC_API_KEY",
+            "value": "@ANTHROPIC_API_KEY",
+            "isSecret": true
+        }
     }
 }
